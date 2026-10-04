@@ -161,6 +161,76 @@ Panel {
     function refresh(): void { TidesStore.refreshAll(root) }
   }
 
+  // Pill used by the saved-locations row
+  readonly property color chipForeground: root.bar ? root.bar.foreground : Color.popups.text
+  component LocationChip: Rectangle {
+    id: chip
+    property string label: ""
+    property string icon: ""
+    property bool active: false
+    property bool removable: false
+    signal picked()
+    signal removed()
+
+    height: Style.space(24)
+    width: chipRow.implicitWidth + Style.space(16)
+    radius: Style.cornerRadius
+    color: active ? Util.alpha(Color.accent, 0.18) : (chipHover.hovered ? Style.hoverFillFor(root.chipForeground, Color.accent) : "transparent")
+    border.width: 1
+    border.color: active ? Color.accent : Util.alpha(root.chipForeground, 0.15)
+
+    MouseArea {
+      id: chipHover
+      readonly property bool hovered: containsMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: chip.picked()
+    }
+
+    Row {
+      id: chipRow
+      anchors.centerIn: parent
+      spacing: Style.space(5)
+
+      Text {
+        visible: chip.icon !== ""
+        text: chip.icon
+        color: chip.active ? Color.accent : Qt.darker(root.chipForeground, 1.3)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        anchors.verticalCenter: parent.verticalCenter
+      }
+      Text {
+        text: chip.label
+        color: root.chipForeground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: chip.active
+        elide: Text.ElideRight
+        width: Math.min(implicitWidth, Style.space(180))
+        anchors.verticalCenter: parent.verticalCenter
+      }
+      Text {
+        visible: chip.removable
+        text: "✕"
+        color: removeHover.hovered ? Color.accent : Qt.darker(root.chipForeground, 1.6)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        anchors.verticalCenter: parent.verticalCenter
+        MouseArea {
+          id: removeHover
+          readonly property bool hovered: containsMouse
+          anchors.fill: parent
+          anchors.margins: -Style.space(4)
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: chip.removed()
+        }
+      }
+    }
+  }
+
   // --- Reports & Time Tracking ---------------------------------------------
   property var marineReport: null
   property int marineRetries: 0
@@ -178,15 +248,32 @@ Panel {
   readonly property string cacheFilePath: Quickshell.env("HOME") + "/.cache/fred.tides/cache.json"
 
   property var weatherLocationState: ({ name: "", latitude: null, longitude: null, unit: "m" })
-  property var tidesLocationState: ({ name: "", latitude: null, longitude: null, unit: "m" })
+  property var tidesLocationState: ({ name: "", latitude: null, longitude: null, unit: "m", saved: [] })
 
   readonly property bool hasOwnLocation: tidesLocationState.latitude !== null && tidesLocationState.longitude !== null
   readonly property var configuredLocationState: hasOwnLocation ? tidesLocationState : weatherLocationState
   readonly property bool hasCoordinates: configuredLocationState.latitude !== null && configuredLocationState.longitude !== null
-  readonly property string activeUnit: configuredLocationState.unit || "m"
+  // The unit toggle lives in tides.json even while following the weather location
+  readonly property string activeUnit: (hasOwnLocation || tidesLocationState.unitSet) ? (tidesLocationState.unit || "m") : (weatherLocationState.unit || "m")
   readonly property string locationKey: hasCoordinates ? configuredLocationState.latitude + "," + configuredLocationState.longitude : ""
 
+  // Saved locations (tides.json "saved"); the active override is always in the list
+  readonly property var savedLocations: {
+    var list = (tidesLocationState.saved || []).slice()
+    if (hasOwnLocation && Model.indexOfLocation(list, tidesLocationState) === -1) {
+      list.unshift({ name: tidesLocationState.name, latitude: tidesLocationState.latitude,
+        longitude: tidesLocationState.longitude, region: tidesLocationState.region || "" })
+    }
+    return list
+  }
+  readonly property int activeSavedIndex: hasOwnLocation ? Model.indexOfLocation(savedLocations, tidesLocationState) : -1
+  readonly property bool weatherHasCoordinates: weatherLocationState.latitude !== null && weatherLocationState.longitude !== null
+
+  property string lastLocationKey: ""
   onLocationKeyChanged: {
+    // Drop the previous place's curve so it isn't shown under the new name while fetching
+    if (lastLocationKey !== "" && locationKey !== lastLocationKey) marineReport = null
+    lastLocationKey = locationKey
     marineRetries = 0
     marineProc.running = false
     Qt.callLater(refresh)
@@ -258,13 +345,13 @@ Panel {
   property string geocodePendingQuery: ""
   property string geocodeActiveQuery: ""
 
-  function startEditingLocation() {
+  function startEditingLocation(blank) {
     editingLocation = true
     savingLocation = false
     locationSuggestions = []
     suggestionIndex = 0
     Qt.callLater(function() {
-      locationField.text = root.configuredLocationState.name
+      locationField.text = blank ? "" : root.configuredLocationState.name
       locationField.selectAll()
       locationField.forceActiveFocus()
     })
@@ -293,24 +380,66 @@ Panel {
     if (!suggestion) return
     savingLocation = true
     var reg = suggestion.admin1 || suggestion.country || ""
-    persistLocation(suggestion.name, suggestion.latitude, suggestion.longitude, root.activeUnit, reg)
+    var loc = { name: suggestion.name, latitude: suggestion.latitude, longitude: suggestion.longitude, region: reg }
+    var list = savedLocations.slice()
+    var i = Model.indexOfLocation(list, loc)
+    if (i === -1) list.push(loc)
+    else list[i] = loc
+    persistLocation(loc.name, loc.latitude, loc.longitude, root.activeUnit, reg, list)
   }
 
+  // Stop overriding: follow the weather location again, keeping the saved list
   function clearLocation() {
-    locationSaveProc.command = ["rm", "-f", root.tidesLocationPath]
-    locationSaveProc.running = true
+    persistLocation(null, null, null, root.activeUnit, "", savedLocations)
     cancelEditingLocation()
+  }
+
+  function selectSaved(index) {
+    var loc = savedLocations[index]
+    if (!loc || index === activeSavedIndex) return
+    persistLocation(loc.name, loc.latitude, loc.longitude, root.activeUnit, loc.region, savedLocations)
+  }
+
+  function removeSaved(index) {
+    var list = savedLocations.slice()
+    if (index < 0 || index >= list.length) return
+    var wasActive = index === activeSavedIndex
+    list.splice(index, 1)
+    if (!wasActive) {
+      var cur = tidesLocationState
+      persistLocation(cur.name, cur.latitude, cur.longitude, root.activeUnit, cur.region, list)
+    } else if (list.length > 0) {
+      var next = list[Math.min(index, list.length - 1)]
+      persistLocation(next.name, next.latitude, next.longitude, root.activeUnit, next.region, list)
+    } else {
+      persistLocation(null, null, null, root.activeUnit, "", list)
+    }
+  }
+
+  // Left/Right in the panel: step through the weather location (if any) and the saved ones
+  function cycleSaved(step) {
+    var count = savedLocations.length
+    if (count === 0) return
+    var first = weatherHasCoordinates ? -1 : 0
+    var next = activeSavedIndex + step
+    if (next >= count) next = first
+    if (next < first) next = count - 1
+    if (next === -1) { if (hasOwnLocation) clearLocation() }
+    else selectSaved(next)
   }
 
   function toggleUnit() {
     var nextUnit = root.activeUnit === "m" ? "ft" : "m"
-    persistLocation(root.configuredLocationState.name, root.configuredLocationState.latitude, root.configuredLocationState.longitude, nextUnit, root.activeRegion)
+    if (root.hasOwnLocation)
+      persistLocation(root.tidesLocationState.name, root.tidesLocationState.latitude, root.tidesLocationState.longitude, nextUnit, root.activeRegion, root.savedLocations)
+    else
+      persistLocation(null, null, null, nextUnit, "", root.savedLocations)
   }
 
-  function persistLocation(name, latitude, longitude, unit, region) {
+  function persistLocation(name, latitude, longitude, unit, region, saved) {
     locationSaveProc.command = ["bash", "-c",
       "mkdir -p \"$(dirname \"$1\")\" && printf '%s' \"$2\" > \"$1\"", "_",
-      root.tidesLocationPath, Model.locationFileContents(name, latitude, longitude, unit, region)]
+      root.tidesLocationPath, Model.locationFileContents(name, latitude, longitude, unit, region, saved || root.savedLocations)]
     locationSaveProc.running = true
   }
 
@@ -519,6 +648,9 @@ Panel {
       }
       onTabRequested: function(direction) {
         root.switchPanel(direction)
+      }
+      onMoveRequested: function(dx, dy) {
+        if (dx !== 0) root.cycleSaved(dx)
       }
 
       Flickable {
@@ -777,6 +909,45 @@ Panel {
                 }
               }
             }
+          }
+        }
+
+        // ---- Saved Locations -------------------------------------------------
+        Flow {
+          id: savedFlow
+          visible: !root.editingLocation && (root.savedLocations.length > 0 || root.hasCoordinates)
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: Style.space(16)
+          anchors.rightMargin: Style.space(16)
+          spacing: Style.space(6)
+
+          LocationChip {
+            visible: root.weatherHasCoordinates
+            icon: "\udb81\udd99" // nf-md-weather_partly_cloudy
+            label: root.weatherLocationState.name || "Weather location"
+            active: !root.hasOwnLocation
+            onPicked: if (root.hasOwnLocation) root.clearLocation()
+          }
+
+          Repeater {
+            model: root.savedLocations
+            LocationChip {
+              required property var modelData
+              required property int index
+              icon: "\uf041"
+              label: modelData.name || (modelData.latitude.toFixed(2) + ", " + modelData.longitude.toFixed(2))
+              active: index === root.activeSavedIndex
+              removable: true
+              onPicked: root.selectSaved(index)
+              onRemoved: root.removeSaved(index)
+            }
+          }
+
+          LocationChip {
+            icon: "+"
+            label: "Add location"
+            onPicked: root.startEditingLocation(true)
           }
         }
 

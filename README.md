@@ -31,6 +31,8 @@ A security-hardened, multi-monitor tide bar widget and interactive 24-hour curve
   Seamlessly toggle between meters (`meters`) and feet (`feet`) with a single click on the boxed unit indicator next to current sea level.
 - **Smart Location Sync & Independent Override:**
   Follows the active weather location in `~/.local/state/omarchy/settings/weather.json` out of the box so weather and tides match. Click the location name to search for a specific beach or harbor (saved in `~/.local/state/omarchy/settings/tides.json`).
+- **Saved Locations:**
+  Every place you pick is kept in a row of location pills under the header (stored as `saved` in `tides.json`). Click a pill or press ←/→ to switch, ✕ to remove one, and **+ Add location** to search for another. When a weather location is set, it appears as the first pill; choosing it returns to following `weather.json`.
 - **Persistent Atomic Disk Caching:**
   Saves valid tide predictions to `~/.cache/fred.tides/cache.json` using atomic descriptor writes. Cold starts display cached curves immediately with zero startup delay.
 - **Hardened Security Baseline:**

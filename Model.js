@@ -4,7 +4,7 @@ var M_TO_FT = 3.280839895
 
 // Parse location JSON (compatible with omarchy weather.json & tides.json)
 function parseLocationFile(raw) {
-  var unset = { name: "", latitude: null, longitude: null, unit: "m", region: "" }
+  var unset = { name: "", latitude: null, longitude: null, unit: "m", region: "", saved: [] }
   try {
     var data = JSON.parse(String(raw || ""))
     if (!data || typeof data !== "object") return unset
@@ -20,11 +20,46 @@ function parseLocationFile(raw) {
       latitude: hasCoordinates ? latitude : null,
       longitude: hasCoordinates ? longitude : null,
       unit: unit,
-      region: region
+      unitSet: data.unit !== undefined,
+      region: region,
+      saved: parseSavedLocations(data.saved)
     }
   } catch (e) {
     return unset
   }
+}
+
+// Saved locations list in tides.json: [{ name, latitude, longitude, region }]
+function parseSavedLocations(list) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length && out.length < 20; i++) {
+    var item = list[i]
+    if (!item || typeof item !== "object") continue
+    var lat = parseFloat(item.latitude)
+    var lon = parseFloat(item.longitude)
+    if (isNaN(lat) || isNaN(lon)) continue
+    var loc = {
+      name: typeof item.name === "string" ? item.name.trim() : "",
+      latitude: lat,
+      longitude: lon,
+      region: typeof item.region === "string" ? item.region.trim() : ""
+    }
+    if (indexOfLocation(out, loc) === -1) out.push(loc)
+  }
+  return out
+}
+
+function sameLocation(a, b) {
+  if (!a || !b || a.latitude === null || b.latitude === null) return false
+  return Math.abs(a.latitude - b.latitude) < 0.001 && Math.abs(a.longitude - b.longitude) < 0.001
+}
+
+function indexOfLocation(list, loc) {
+  for (var i = 0; i < (list || []).length; i++) {
+    if (sameLocation(list[i], loc)) return i
+  }
+  return -1
 }
 
 function formatLocationDisplay(name, region) {
@@ -46,15 +81,24 @@ function formatTidesTitle(locationDisplay) {
   return loc ? "Tides for " + loc : "Tides"
 }
 
-function locationFileContents(name, latitude, longitude, unit, region) {
+// latitude === null writes no active location (follow weather.json) but keeps unit and saved list
+function locationFileContents(name, latitude, longitude, unit, region, saved) {
   var u = unit === "ft" ? "ft" : "m"
-  var obj = {
-    name: name || "",
-    latitude: latitude,
-    longitude: longitude,
-    unit: u
+  var obj = {}
+  if (latitude !== null && latitude !== undefined) {
+    obj.name = name || ""
+    obj.latitude = latitude
+    obj.longitude = longitude
   }
-  if (region) obj.region = region
+  obj.unit = u
+  if (region && obj.latitude !== undefined) obj.region = region
+  if (saved && saved.length) {
+    obj.saved = saved.map(function(l) {
+      var o = { name: l.name || "", latitude: l.latitude, longitude: l.longitude }
+      if (l.region) o.region = l.region
+      return o
+    })
+  }
   return JSON.stringify(obj, null, 2) + "\n"
 }
 
@@ -394,6 +438,9 @@ if (typeof module !== "undefined") {
   module.exports = {
     M_TO_FT: M_TO_FT,
     parseLocationFile: parseLocationFile,
+    parseSavedLocations: parseSavedLocations,
+    sameLocation: sameLocation,
+    indexOfLocation: indexOfLocation,
     formatLocationDisplay: formatLocationDisplay,
     formatTidesTitle: formatTidesTitle,
     locationFileContents: locationFileContents,
