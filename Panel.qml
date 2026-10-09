@@ -806,6 +806,7 @@ Panel {
 
                 Text {
                   text: modelData.name
+                  textFormat: Text.PlainText
                   color: index === root.suggestionIndex ? Style.hoverStateColor(root.bar ? root.bar.foreground : Color.popups.text, Color.accent) : (root.bar ? root.bar.foreground : Color.popups.text)
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -813,6 +814,7 @@ Panel {
                 Text {
                   visible: text !== ""
                   text: modelData.description
+                  textFormat: Text.PlainText
                   color: Qt.darker(root.bar ? root.bar.foreground : Color.popups.text, 1.5)
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall
