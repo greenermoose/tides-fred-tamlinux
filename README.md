@@ -1,5 +1,9 @@
 # fred.tides (`tides-fred-tamlinux`)
 
+> [!IMPORTANT]
+> **Repository Frozen:** This repository is frozen and retained for historical reference as the Omarchy 1.x release suite. Active Tamlinux development for `fred.tides` has moved to the unified [Tamlinux](https://github.com/greenermoose/tamlinux) repository under [`desktop/plugins/fred.tides/`](https://github.com/greenermoose/tamlinux/tree/main/desktop/plugins/fred.tides).
+
+
 A security-hardened, multi-monitor tide bar widget and interactive 24-hour curve panel for [Tamlinux](https://github.com/greenermoose/tamlinux) (Fred's personal Linux workstation environment), designed to sit directly adjacent to `fred.weather` on the bar. Displays current sea level height, rising/falling status, today's tidal range, upcoming highs and lows, and a scrubbable Catmull-Rom tidal curve.
 
 ![fred.tides — 24-Hour Scrubbable Curve, Range Bar & Daily Tides](assets/screenshot.png)
